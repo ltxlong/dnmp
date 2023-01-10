@@ -1,0 +1,141 @@
+version: '3' # 指定本 yml 依从的 compose 哪个版本制定的
+
+services: # 多个容器集合
+  nginx-server: # 自定义服务名称
+    container_name: nginx # 容器名称
+    image: nginx:alpine # 镜像名，如果Dockerfile和image参数同时存在，那么优先用Dockerfile构建，并且名字用image的参数
+    privileged: true
+    depends_on: # 依赖，会在如下依赖服务启动之后再启动本服务
+      - php-server
+    build:
+      context: ./services/nginx # Dockerfile所在目录
+    ports: # 端口映射，外部端口：内部端口
+      - "${NGINX_HTTP_PORT}:80"
+      - "${NGINX_HTTPS_PORT}:443"
+    volumes: # 映射宿主机和容器目录，数据是永久保存的 日志的路径通过配置文件配置
+      - ${APP_CODE_DIR}:/var/www
+      - ./services/nginx/conf.d:/etc/nginx/conf.d
+      - ./services/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./services/nginx/cert:/etc/nginx/cert
+      - ./services/nginx/log:/var/log/nginx
+    environment: #设置镜像变量，它可以保存变量到镜像里面，也就是说启动的容器也会包含这些变量设置
+      TIME_ZONE: ${TIME_ZONE}
+    networks: # 指定加入的网络
+      - frontend
+    restart: always
+
+  php-server:
+    container_name: php # nginx配置文件里，写的通信名是这个
+    # 因为php的dockerfile里面加了很多扩展，如果再写image参数，会出现两个php镜像，镜像标签也是个问题
+    privileged: true
+    depends_on:
+      - mysql-server
+      - redis-server
+    build:
+      context: ./services/php
+      args:
+        CONTAINER_PACKAGE_URL: ${CONTAINER_PACKAGE_URL}
+        PHP_VERSION: ${PHP_VERSION}
+        PHPREDIS_VERSION: ${PHPREDIS_VERSION}
+        SWOOLE_VERSION: ${SWOOLE_VERSION}
+        YASD_VERSION: ${YASD_VERSION}
+        AMQP_VERSION: ${AMQP_VERSION}
+    ports:
+      - "9501:9501"
+      - "2222:22"
+    volumes:
+      - ${APP_CODE_DIR}:/var/www
+      - ./services/php/php.ini:/usr/local/etc/php/php.ini
+      - ./services/php/php-fpm.d/www.conf:/usr/local/etc/php/php-fpm.d/www.conf
+      - ./services/php/log:/var/log/php
+    environment:
+      TIME_ZONE: ${TIME_ZONE}
+      PHP_IDE_CONFIG: "serverName=docker" # phpstorm调试用
+    networks:
+      - frontend
+      - backend
+    restart: always
+
+  mysql-server:
+    container_name: mysql
+    image: mysql:${MYSQL_VERSION}
+    privileged: true
+    build:
+      context: ./services/mysql
+      args:
+        MYSQL_VERSION: ${MYSQL_VERSION}
+    ports:
+      - "${MYSQL_PORT}:3306"
+    volumes:
+      - ./services/mysql/data:/var/lib/mysql
+      - ./services/mysql/my.cnf:/etc/my.cnf
+      - ./services/mysql/log:/var/log/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TIME_ZONE: ${TIME_ZONE}
+    command: --default-authentication-plugin=mysql_native_password
+    networks:
+      - backend
+    restart: always
+
+  redis-server:
+    container_name: redis
+    image: redis:alpine
+    privileged: true
+    build:
+      context: ./services/redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - ./services/redis/data:/data
+      - ./services/redis/redis.conf:/etc/redis.conf
+    environment:
+      TIME_ZONE: ${TIME_ZONE}
+    command: redis-server /etc/redis.conf
+    networks:
+      - backend
+    restart: always
+
+  rabbitmq-server:
+    container_name: rabbitmq
+    image: rabbitmq:alpine
+    privileged: true
+    build:
+      context: ./services/rabbitmq
+    ports:
+      - "${RABBITMQ_HOST_PORT_C}:5672"
+      - "${RABBITMQ_HOST_PORT_S}:15672"
+    volumes:
+      - ./services/rabbitmq/data:/var/lib/rabbitmq/data
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      TIME_ZONE: ${TIME_ZONE}
+    networks:
+      - backend
+    restart: always
+
+  phpmyadmin-server:
+    container_name: phpmyadmin
+    image: phpmyadmin/phpmyadmin
+    privileged: true
+    depends_on:
+      - mysql-server
+    build:
+      context: ./services/phpmyadmin
+    ports:
+      - "${PHPMYADMIN_HOST_PORT}:80"
+    environment:
+      PMA_HOST: ${PMA_HOST}
+      PMA_PORT: ${PMA_PORT}
+      TIME_ZONE: ${TIME_ZONE}
+    networks:
+      - frontend
+      - backend
+    restart: always
+
+networks:
+  frontend:
+  backend:
+
+
